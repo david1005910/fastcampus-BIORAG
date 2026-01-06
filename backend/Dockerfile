@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
+# DuckDB configuration
+ENV DUCKDB_PATH=/app/data/memory.duckdb
+
 # Set work directory
 WORKDIR /app
 
@@ -24,8 +27,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Create data directory
-RUN mkdir -p /app/data
+# Create data directory for DuckDB and other persistent storage
+RUN mkdir -p /app/data && chmod 755 /app/data
+
+# Declare volume for DuckDB data persistence
+VOLUME ["/app/data"]
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser && \

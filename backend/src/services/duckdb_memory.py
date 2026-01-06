@@ -16,6 +16,7 @@ import json
 import uuid
 import time
 import logging
+import os
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
@@ -61,10 +62,12 @@ class DuckDBManager:
     def _initialize(self, db_path: str = None):
         """DuckDB 초기화"""
         if db_path is None:
-            # 기본 경로: data/memory.duckdb
-            data_dir = Path("data")
-            data_dir.mkdir(exist_ok=True)
-            db_path = str(data_dir / "memory.duckdb")
+            # 환경변수 또는 기본 경로: data/memory.duckdb
+            db_path = os.environ.get("DUCKDB_PATH")
+            if not db_path:
+                data_dir = Path("data")
+                data_dir.mkdir(exist_ok=True)
+                db_path = str(data_dir / "memory.duckdb")
 
         # 인메모리 모드
         if db_path == ':memory:':
