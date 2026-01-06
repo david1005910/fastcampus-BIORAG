@@ -6,7 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# DuckDB configuration
+# Memory Backend configuration
+# Options: "redis" or "duckdb" (default: duckdb)
+ENV MEMORY_BACKEND=duckdb
 ENV DUCKDB_PATH=/app/data/memory.duckdb
 
 # Set work directory

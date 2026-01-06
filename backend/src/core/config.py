@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Memory Backend: "redis" or "duckdb"
+    MEMORY_BACKEND: str = "duckdb"
+    DUCKDB_PATH: str = ""  # Empty means default path (data/memory.duckdb)
+
     # Qdrant Vector Database
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333

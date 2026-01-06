@@ -10,7 +10,7 @@ from src.core.config import settings
 from src.core.csrf import CSRFMiddleware
 from src.core.database import init_db, close_db
 from src.api.v1 import auth, search, chat, library, trends, vectordb
-from src.services.duckdb_memory import router as memory_router
+from src.services.memory_factory import router as memory_router
 
 # Configure logging
 logging.basicConfig(
