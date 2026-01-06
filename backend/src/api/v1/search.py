@@ -47,6 +47,7 @@ class PaperResult(BaseModel):
     journal: str = ""
     publication_date: Optional[str] = None
     keywords: List[str] = []
+    pmcid: Optional[str] = None  # PMC ID for PDF access (used by Docling)
 
 
 class SearchResponse(BaseModel):

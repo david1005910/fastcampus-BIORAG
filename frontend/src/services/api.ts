@@ -381,6 +381,7 @@ export interface PaperForVectorDB {
   journal: string
   publication_date?: string
   keywords: string[]
+  pmcid?: string  // PMC ID for PDF access (used by Docling)
 }
 
 export interface SavePapersResponse {
@@ -388,12 +389,15 @@ export interface SavePapersResponse {
   total_chunks: number
   processing_time_ms: number
   paper_ids: string[]
+  docling_enhanced: number  // Number of papers enhanced with Docling
+  docling_available: boolean  // Whether Docling is available
 }
 
 export interface VectorDBStats {
   collection_name: string
   vectors_count: number
   status: string
+  docling_available?: boolean  // Whether Docling PDF parsing is available
 }
 
 export interface VectorSearchResult {
@@ -429,8 +433,8 @@ export interface VectorDBPapersResponse {
 }
 
 export const vectordbApi = {
-  savePapers: async (papers: PaperForVectorDB[]): Promise<SavePapersResponse> => {
-    const response = await api.post('/vectordb/papers/save', { papers })
+  savePapers: async (papers: PaperForVectorDB[], useDocling: boolean = false): Promise<SavePapersResponse> => {
+    const response = await api.post('/vectordb/papers/save', { papers, use_docling: useDocling })
     return response.data
   },
 

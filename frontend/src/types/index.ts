@@ -20,6 +20,7 @@ export interface PaperSearchResult {
   journal: string
   publicationDate?: string
   keywords: string[]
+  pmcid?: string  // PMC ID for PDF access (used by Docling)
 }
 
 export interface SearchResponse {

@@ -78,8 +78,9 @@ export default function SearchPage() {
 
   const [query, setQuery] = useState(initialQuery)
   const [isSavingToVectorDB, setIsSavingToVectorDB] = useState(false)
-  const [vectorDBSaveResult, setVectorDBSaveResult] = useState<{ saved: number; chunks: number } | null>(null)
+  const [vectorDBSaveResult, setVectorDBSaveResult] = useState<{ saved: number; chunks: number; doclingEnhanced?: number } | null>(null)
   const [autoSavedQuery, setAutoSavedQuery] = useState<string | null>(storedAutoSavedQuery)
+  const [useDocling, setUseDocling] = useState(false)  // Docling PDF parsing option
 
   // Pagination state - initialize from URL or store
   const [currentPage, setCurrentPage] = useState(() => {
@@ -198,15 +199,17 @@ export default function SearchPage() {
           journal: paper.journal,
           publication_date: paper.publicationDate,
           keywords: paper.keywords || [],
+          pmcid: paper.pmcid,  // Include PMC ID for Docling
         }))
 
-        const result = await vectordbApi.savePapers(papers)
+        const result = await vectordbApi.savePapers(papers, useDocling)
         setVectorDBSaveResult({
           saved: result.saved_count,
           chunks: result.total_chunks,
+          doclingEnhanced: result.docling_enhanced,
         })
         setAutoSavedQuery(currentQuery) // Mark this query as saved
-        console.log(`Auto-saved ${result.saved_count} papers to VectorDB`)
+        console.log(`Auto-saved ${result.saved_count} papers to VectorDB (Docling: ${result.docling_enhanced} enhanced)`)
       } catch (error) {
         logError('Auto-save to VectorDB', error)
       } finally {
@@ -215,7 +218,7 @@ export default function SearchPage() {
     }
 
     autoSaveToVectorDB()
-  }, [data, searchTerm, translatedQuery, isKoreanSearch, isSavingToVectorDB, autoSavedQuery])
+  }, [data, searchTerm, translatedQuery, isKoreanSearch, isSavingToVectorDB, autoSavedQuery, useDocling])
 
   // Save search state to store when results arrive (for persistence across navigation)
   useEffect(() => {
@@ -382,12 +385,14 @@ export default function SearchPage() {
         journal: paper.journal,
         publication_date: paper.publicationDate,
         keywords: paper.keywords || [],
+        pmcid: paper.pmcid,  // Include PMC ID for Docling
       }))
 
-      const result = await vectordbApi.savePapers(papers)
+      const result = await vectordbApi.savePapers(papers, useDocling)
       setVectorDBSaveResult({
         saved: result.saved_count,
         chunks: result.total_chunks,
+        doclingEnhanced: result.docling_enhanced,
       })
     } catch (error) {
       logError('VectorDB save', error)
@@ -481,6 +486,23 @@ export default function SearchPage() {
               <span className="text-white/50 ml-2">({data.tookMs}ms)</span>
             </p>
             <div className="flex items-center gap-3">
+              {/* Docling Toggle */}
+              {data.results.length > 0 && (
+                <label
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg glossy-bg cursor-pointer hover:bg-white/10 transition-all"
+                  title="Docling을 사용하여 PDF에서 전체 텍스트 추출 (PMC 논문만)"
+                >
+                  <input
+                    type="checkbox"
+                    checked={useDocling}
+                    onChange={(e) => setUseDocling(e.target.checked)}
+                    disabled={isSavingToVectorDB}
+                    className="w-4 h-4 rounded border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 bg-gray-700"
+                  />
+                  <FileDown size={16} className={useDocling ? 'text-cyan-400' : 'text-gray-400'} />
+                  <span className={`text-sm ${useDocling ? 'text-cyan-300' : 'text-gray-400'}`}>Docling</span>
+                </label>
+              )}
               {/* VectorDB Indexing Button */}
               {data.results.length > 0 && (
                 <button
@@ -491,17 +513,20 @@ export default function SearchPage() {
                       ? 'bg-green-500/30 text-green-200 border border-green-400/30'
                       : 'glossy-btn-primary hover:scale-105'
                   }`}
-                  title={`전체 ${totalResults}개 논문을 벡터화하여 VectorDB에 저장`}
+                  title={`전체 ${totalResults}개 논문을 벡터화하여 VectorDB에 저장${useDocling ? ' (Docling PDF 파싱 사용)' : ''}`}
                 >
                   {isSavingToVectorDB ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
-                      <span>{totalResults}개 논문 인덱싱 중...</span>
+                      <span>{totalResults}개 논문 인덱싱 중{useDocling ? ' (Docling)' : ''}...</span>
                     </>
                   ) : vectorDBSaveResult ? (
                     <>
                       <CheckCircle size={18} />
-                      <span>완료: {vectorDBSaveResult.saved}개 논문 ({vectorDBSaveResult.chunks} chunks)</span>
+                      <span>
+                        완료: {vectorDBSaveResult.saved}개 논문 ({vectorDBSaveResult.chunks} chunks)
+                        {vectorDBSaveResult.doclingEnhanced ? ` [Docling: ${vectorDBSaveResult.doclingEnhanced}]` : ''}
+                      </span>
                     </>
                   ) : (
                     <>

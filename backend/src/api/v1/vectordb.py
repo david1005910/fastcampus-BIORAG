@@ -19,6 +19,7 @@ import numpy as np
 
 from src.core.config import settings
 from src.data.vectordb_metadata_store import vectordb_metadata_store
+from src.services.docling_service import get_docling_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,13 @@ class PaperForVectorDB(BaseModel):
     journal: str = ""
     publication_date: Optional[str] = None
     keywords: List[str] = []
+    pmcid: Optional[str] = None  # PMC ID for PDF access
 
 
 class SavePapersRequest(BaseModel):
     """Request to save multiple papers"""
     papers: List[PaperForVectorDB]
+    use_docling: bool = False  # Use Docling for enhanced PDF parsing
 
 
 class SavePapersResponse(BaseModel):
@@ -49,6 +52,8 @@ class SavePapersResponse(BaseModel):
     total_chunks: int
     processing_time_ms: int
     paper_ids: List[str]
+    docling_enhanced: int = 0  # Number of papers enhanced with Docling
+    docling_available: bool = False  # Whether Docling is available
 
 
 class VectorDBStatsResponse(BaseModel):
@@ -63,6 +68,7 @@ class VectorDBStatsResponse(BaseModel):
     splade_vocab_size: Optional[int] = None
     with_embeddings: Optional[int] = None
     qdrant_status: Optional[str] = None
+    docling_available: Optional[bool] = None  # Docling PDF parsing available
 
 
 class SearchVectorDBRequest(BaseModel):
@@ -947,6 +953,7 @@ async def save_papers_to_vectordb(request: SavePapersRequest):
     Save papers to vector database
 
     - Chunks paper text (title + abstract)
+    - Optionally uses Docling for enhanced PDF parsing (full text extraction)
     - Generates embeddings using OpenAI
     - Stores in vector database
     - Returns count of saved papers and chunks
@@ -954,30 +961,78 @@ async def save_papers_to_vectordb(request: SavePapersRequest):
     start_time = time.time()
 
     vector_store = get_vector_store()
+    docling_service = get_docling_service()
+    docling_available = docling_service.is_available()
+    docling_enhanced_count = 0
 
     all_texts = []
     all_metadatas = []
     paper_ids = []
 
     for paper in request.papers:
-        # Combine title and abstract
-        full_text = f"{paper.title}. {paper.abstract}" if paper.abstract else paper.title
+        full_text = ""
+        sections_to_store = []
+
+        # Try Docling enhancement if requested and available
+        if request.use_docling and docling_available and paper.pmcid:
+            try:
+                parsed = await docling_service.enhance_paper_content(
+                    pmid=paper.pmid,
+                    title=paper.title,
+                    abstract=paper.abstract,
+                    pmcid=paper.pmcid
+                )
+                if parsed and parsed.parse_method == "docling":
+                    full_text = parsed.text
+                    docling_enhanced_count += 1
+                    logger.info(f"Docling enhanced paper {paper.pmid} with {len(parsed.sections)} sections")
+
+                    # Store each section as separate chunks
+                    for section in parsed.sections:
+                        sections_to_store.append({
+                            "text": f"{section['title']}: {section['content']}",
+                            "section": section['title'].lower()
+                        })
+            except Exception as e:
+                logger.warning(f"Docling enhancement failed for {paper.pmid}: {e}")
+
+        # Fallback to title + abstract
+        if not full_text:
+            full_text = f"{paper.title}. {paper.abstract}" if paper.abstract else paper.title
 
         # Chunk the text
-        chunks = chunk_text(full_text)
-
-        for i, chunk in enumerate(chunks):
-            all_texts.append(chunk)
-            all_metadatas.append({
-                "pmid": paper.pmid,
-                "title": paper.title,
-                "journal": paper.journal,
-                "publication_date": paper.publication_date or "",
-                "section": "abstract",
-                "chunk_index": i,
-                "authors": ", ".join(paper.authors[:3]) if paper.authors else "",
-                "keywords": ", ".join(paper.keywords[:5]) if paper.keywords else ""
-            })
+        if sections_to_store:
+            # Process each section separately
+            for section_data in sections_to_store:
+                chunks = chunk_text(section_data["text"])
+                for i, chunk in enumerate(chunks):
+                    all_texts.append(chunk)
+                    all_metadatas.append({
+                        "pmid": paper.pmid,
+                        "title": paper.title,
+                        "journal": paper.journal,
+                        "publication_date": paper.publication_date or "",
+                        "section": section_data["section"],
+                        "chunk_index": i,
+                        "authors": ", ".join(paper.authors[:3]) if paper.authors else "",
+                        "keywords": ", ".join(paper.keywords[:5]) if paper.keywords else "",
+                        "docling_enhanced": True
+                    })
+        else:
+            chunks = chunk_text(full_text)
+            for i, chunk in enumerate(chunks):
+                all_texts.append(chunk)
+                all_metadatas.append({
+                    "pmid": paper.pmid,
+                    "title": paper.title,
+                    "journal": paper.journal,
+                    "publication_date": paper.publication_date or "",
+                    "section": "abstract",
+                    "chunk_index": i,
+                    "authors": ", ".join(paper.authors[:3]) if paper.authors else "",
+                    "keywords": ", ".join(paper.keywords[:5]) if paper.keywords else "",
+                    "docling_enhanced": False
+                })
 
         paper_ids.append(paper.pmid)
 
@@ -1005,13 +1060,18 @@ async def save_papers_to_vectordb(request: SavePapersRequest):
 
     took_ms = int((time.time() - start_time) * 1000)
 
-    logger.info(f"Saved {len(request.papers)} papers ({len(all_texts)} chunks) to VectorDB + metadata in {took_ms}ms")
+    logger.info(
+        f"Saved {len(request.papers)} papers ({len(all_texts)} chunks) to VectorDB + metadata in {took_ms}ms"
+        f" [Docling: {docling_enhanced_count} enhanced]"
+    )
 
     return SavePapersResponse(
         saved_count=len(request.papers),
         total_chunks=len(all_texts),
         processing_time_ms=took_ms,
-        paper_ids=paper_ids
+        paper_ids=paper_ids,
+        docling_enhanced=docling_enhanced_count,
+        docling_available=docling_available
     )
 
 
@@ -1024,9 +1084,14 @@ async def get_vectordb_stats():
     - Shows number of stored vectors
     - Indicates search mode (hybrid/dense/sparse)
     - Shows SPLADE indexing status
+    - Shows Docling availability
     """
     vector_store = get_vector_store()
     stats = vector_store.get_stats()
+
+    # Check Docling availability
+    docling_service = get_docling_service()
+    docling_available = docling_service.is_available()
 
     return VectorDBStatsResponse(
         collection_name=stats["collection_name"],
@@ -1038,7 +1103,8 @@ async def get_vectordb_stats():
         splade_indexed=stats.get("splade_indexed"),
         splade_vocab_size=stats.get("splade_vocab_size"),
         with_embeddings=stats.get("with_embeddings"),
-        qdrant_status=stats.get("qdrant_status")
+        qdrant_status=stats.get("qdrant_status"),
+        docling_available=docling_available
     )
 
 
