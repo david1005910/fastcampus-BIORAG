@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # External APIs
     PUBMED_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_MODEL: str = "gpt-4o-mini"  # Fast and cost-effective model
     COHERE_API_KEY: str = ""  # For reranking
 
     # Embedding Model

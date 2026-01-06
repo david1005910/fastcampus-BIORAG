@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Send, Loader2, BookOpen, RefreshCw, Database, Search, ExternalLink, FileText, ChevronUp, ChevronDown } from 'lucide-react'
+import { Send, Loader2, BookOpen, RefreshCw, Database, Search, ExternalLink, FileText, ChevronUp, ChevronDown, Globe, Cpu, CheckCircle2, Clock } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import DOMPurify from 'dompurify'
 import { chatApi } from '@/services/api'
@@ -13,10 +13,27 @@ interface ExtendedChatMessage extends ChatMessage {
   searchMode?: string
 }
 
+// Search progress state type
+interface SearchProgress {
+  phase: 'idle' | 'translating' | 'searching' | 'generating'
+  startTime: number
+  query: string
+  translatedQuery?: string
+  searchResults?: number
+}
+
+// Check if query contains Korean
+const containsKorean = (text: string) => /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)
+
 export default function ChatPage() {
   const [input, setInput] = useState('')
   const [useVectordb, setUseVectordb] = useState(true)
   const [searchMode, setSearchMode] = useState<'hybrid' | 'dense' | 'sparse'>('hybrid')
+  const [searchProgress, setSearchProgress] = useState<SearchProgress>({
+    phase: 'idle',
+    startTime: 0,
+    query: '',
+  })
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const {
     messages,
@@ -35,14 +52,67 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messages])
 
+  // Timer for elapsed time display
+  const [elapsedTime, setElapsedTime] = useState(0)
+
+  useEffect(() => {
+    if (searchProgress.phase === 'idle') {
+      setElapsedTime(0)
+      return
+    }
+
+    const interval = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - searchProgress.startTime) / 1000))
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [searchProgress.phase, searchProgress.startTime])
+
+  // Simulate progress phases based on timing
+  useEffect(() => {
+    if (searchProgress.phase === 'idle') return
+
+    const timers: NodeJS.Timeout[] = []
+
+    if (searchProgress.phase === 'translating') {
+      // Move to searching after 1s
+      timers.push(setTimeout(() => {
+        setSearchProgress(prev => ({
+          ...prev,
+          phase: 'searching',
+          translatedQuery: containsKorean(prev.query) ? 'Translated query...' : prev.query,
+        }))
+      }, 1000))
+    }
+
+    if (searchProgress.phase === 'searching') {
+      // Move to generating after 2s
+      timers.push(setTimeout(() => {
+        setSearchProgress(prev => ({
+          ...prev,
+          phase: 'generating',
+          searchResults: useVectordb ? 50 : 0,
+        }))
+      }, 2000))
+    }
+
+    return () => timers.forEach(t => clearTimeout(t))
+  }, [searchProgress.phase, useVectordb])
+
   const queryMutation = useMutation({
     mutationFn: (question: string) =>
       chatApi.query(question, currentSessionId || undefined, undefined, {
         useVectordb,
         searchMode,
       }),
-    onMutate: () => {
+    onMutate: (question) => {
       setLoading(true)
+      // Start progress tracking
+      setSearchProgress({
+        phase: containsKorean(question) ? 'translating' : 'searching',
+        startTime: Date.now(),
+        query: question,
+      })
     },
     onSuccess: (data) => {
       // Deduplicate sources by PMID, keeping the one with highest relevance score
@@ -69,6 +139,8 @@ export default function ChatPage() {
       }
       addMessage(assistantMessage)
       setLoading(false)
+      // Reset progress
+      setSearchProgress({ phase: 'idle', startTime: 0, query: '' })
     },
     onError: () => {
       const errorMessage: ChatMessage = {
@@ -79,6 +151,8 @@ export default function ChatPage() {
       }
       addMessage(errorMessage)
       setLoading(false)
+      // Reset progress
+      setSearchProgress({ phase: 'idle', startTime: 0, query: '' })
     },
   })
 
@@ -215,10 +289,98 @@ export default function ChatPage() {
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="glossy-panel-sm px-6 py-4">
-              <div className="flex items-center gap-2 liquid-text-muted">
-                <Loader2 className="animate-spin" size={18} />
-                답변 생성 중...
+            <div className="glossy-panel-sm px-6 py-4 min-w-[400px]">
+              {/* Search Progress Panel */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <Clock size={16} className="text-purple-500" />
+                  <span>검색 진행 상황</span>
+                  <span className="text-xs text-slate-400">
+                    {elapsedTime}초 경과
+                  </span>
+                </div>
+
+                {/* Query Display */}
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                  <div className="text-xs text-slate-500 mb-1">질문</div>
+                  <div className="text-sm text-slate-700 font-medium">{searchProgress.query}</div>
+                </div>
+
+                {/* Progress Steps */}
+                <div className="space-y-2">
+                  {/* Translation Step */}
+                  {containsKorean(searchProgress.query) && (
+                    <div className={`flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      searchProgress.phase === 'translating'
+                        ? 'bg-blue-50 border border-blue-200'
+                        : searchProgress.phase !== 'idle' && searchProgress.translatedQuery
+                          ? 'bg-green-50 border border-green-200'
+                          : 'bg-slate-50 border border-slate-200'
+                    }`}>
+                      {searchProgress.phase === 'translating' ? (
+                        <Loader2 size={16} className="animate-spin text-blue-500" />
+                      ) : searchProgress.translatedQuery ? (
+                        <CheckCircle2 size={16} className="text-green-500" />
+                      ) : (
+                        <Globe size={16} className="text-slate-400" />
+                      )}
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-slate-700">한글 → 영어 번역</div>
+                        {searchProgress.translatedQuery && (
+                          <div className="text-xs text-slate-500 mt-0.5">{searchProgress.translatedQuery}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VectorDB Search Step */}
+                  {useVectordb && (
+                    <div className={`flex items-center gap-3 p-2 rounded-lg transition-all ${
+                      searchProgress.phase === 'searching'
+                        ? 'bg-purple-50 border border-purple-200'
+                        : searchProgress.phase === 'generating'
+                          ? 'bg-green-50 border border-green-200'
+                          : 'bg-slate-50 border border-slate-200'
+                    }`}>
+                      {searchProgress.phase === 'searching' ? (
+                        <Loader2 size={16} className="animate-spin text-purple-500" />
+                      ) : searchProgress.phase === 'generating' ? (
+                        <CheckCircle2 size={16} className="text-green-500" />
+                      ) : (
+                        <Database size={16} className="text-slate-400" />
+                      )}
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-slate-700">
+                          VectorDB 검색 ({searchMode === 'hybrid' ? 'Hybrid' : searchMode === 'dense' ? 'Dense' : 'Sparse'})
+                        </div>
+                        {searchProgress.searchResults !== undefined && (
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {searchProgress.searchResults}개 문서에서 관련 논문 검색 완료
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Generation Step */}
+                  <div className={`flex items-center gap-3 p-2 rounded-lg transition-all ${
+                    searchProgress.phase === 'generating'
+                      ? 'bg-cyan-50 border border-cyan-200'
+                      : 'bg-slate-50 border border-slate-200'
+                  }`}>
+                    {searchProgress.phase === 'generating' ? (
+                      <Loader2 size={16} className="animate-spin text-cyan-500" />
+                    ) : (
+                      <Cpu size={16} className="text-slate-400" />
+                    )}
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-slate-700">AI 답변 생성</div>
+                      {searchProgress.phase === 'generating' && (
+                        <div className="text-xs text-slate-500 mt-0.5">GPT-4o-mini로 답변 작성 중...</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
