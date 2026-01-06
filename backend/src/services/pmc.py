@@ -24,7 +24,8 @@ class PMCService:
 
     PMC_ID_CONVERTER_URL = "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
     PMC_OA_URL = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
-    PMC_PDF_BASE_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/"
+    # Updated to new PMC domain (old www.ncbi.nlm.nih.gov redirects to pmc.ncbi.nlm.nih.gov)
+    PMC_PDF_BASE_URL = "https://pmc.ncbi.nlm.nih.gov/articles/"
 
     def __init__(self, email: str = "bio-rag@example.com"):
         self.email = email
@@ -57,7 +58,8 @@ class PMCService:
                         pmid = record.get("pmid")
                         pmcid = record.get("pmcid")
                         if pmid and pmcid:
-                            result[pmid] = pmcid
+                            # Convert PMID to string for consistent key matching
+                            result[str(pmid)] = pmcid
 
         except Exception as e:
             logger.error(f"Error converting PMIDs to PMCIDs: {e}")

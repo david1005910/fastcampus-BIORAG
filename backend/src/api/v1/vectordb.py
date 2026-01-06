@@ -20,6 +20,7 @@ import numpy as np
 from src.core.config import settings
 from src.data.vectordb_metadata_store import vectordb_metadata_store
 from src.services.docling_service import get_docling_service
+from src.services.pmc import get_pmc_service
 
 logger = logging.getLogger(__name__)
 
@@ -954,6 +955,7 @@ async def save_papers_to_vectordb(request: SavePapersRequest):
 
     - Chunks paper text (title + abstract)
     - Optionally uses Docling for enhanced PDF parsing (full text extraction)
+    - Fetches PMC IDs when Docling is enabled (for PDF access)
     - Generates embeddings using OpenAI
     - Stores in vector database
     - Returns count of saved papers and chunks
@@ -965,22 +967,34 @@ async def save_papers_to_vectordb(request: SavePapersRequest):
     docling_available = docling_service.is_available()
     docling_enhanced_count = 0
 
+    # Fetch PMC IDs if Docling is enabled (only when saving, not during search)
+    pmcid_map = {}
+    if request.use_docling and docling_available:
+        pmc_service = get_pmc_service()
+        pmids = [paper.pmid for paper in request.papers if not paper.pmcid]
+        if pmids:
+            pmcid_map = await pmc_service._convert_pmid_to_pmcid(pmids)
+            pmc_count = sum(1 for v in pmcid_map.values() if v)
+            logger.info(f"PMC ID lookup for Docling: {pmc_count}/{len(pmids)} papers have PMC IDs")
+
     all_texts = []
     all_metadatas = []
     paper_ids = []
 
     for paper in request.papers:
+        # Use existing PMCID or lookup from PMC
+        pmcid = paper.pmcid or pmcid_map.get(paper.pmid)
         full_text = ""
         sections_to_store = []
 
         # Try Docling enhancement if requested and available
-        if request.use_docling and docling_available and paper.pmcid:
+        if request.use_docling and docling_available and pmcid:
             try:
                 parsed = await docling_service.enhance_paper_content(
                     pmid=paper.pmid,
                     title=paper.title,
                     abstract=paper.abstract,
-                    pmcid=paper.pmcid
+                    pmcid=pmcid
                 )
                 if parsed and parsed.parse_method == "docling":
                     full_text = parsed.text

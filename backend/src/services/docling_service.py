@@ -62,8 +62,8 @@ class DoclingService:
             return None
 
         try:
-            # Download PDF to temp file
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # Download PDF to temp file (follow_redirects handles 301/302)
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                 response = await client.get(pdf_url)
                 response.raise_for_status()
 
@@ -197,8 +197,9 @@ class DoclingService:
         Falls back to abstract-only if PDF not available.
         """
         # Try to get PDF from PMC if we have pmcid
+        # Using new PMC domain (old www.ncbi.nlm.nih.gov redirects to pmc.ncbi.nlm.nih.gov)
         if pmcid:
-            pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
+            pdf_url = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/pdf/"
 
             try:
                 parsed = await self.parse_pdf_from_url(pdf_url, pmid, title)

@@ -499,8 +499,8 @@ export default function SearchPage() {
                     disabled={isSavingToVectorDB}
                     className="w-4 h-4 rounded border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 bg-gray-700"
                   />
-                  <FileDown size={16} className={useDocling ? 'text-cyan-400' : 'text-gray-400'} />
-                  <span className={`text-sm ${useDocling ? 'text-cyan-300' : 'text-gray-400'}`}>Docling</span>
+                  <FileDown size={16} className={useDocling ? 'text-blue-500' : 'text-gray-400'} />
+                  <span className={`text-sm font-medium ${useDocling ? 'text-blue-600' : 'text-gray-400'}`}>Docling</span>
                 </label>
               )}
               {/* VectorDB Indexing Button */}

@@ -292,12 +292,44 @@ export default function ChatPage() {
             <div className="glossy-panel-sm px-6 py-4 min-w-[400px]">
               {/* Search Progress Panel */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                  <Clock size={16} className="text-purple-500" />
-                  <span>검색 진행 상황</span>
-                  <span className="text-xs text-slate-400">
-                    {elapsedTime}초 경과
+                <div className="flex items-center justify-between text-sm font-medium text-slate-700">
+                  <div className="flex items-center gap-2">
+                    <Clock size={16} className="text-purple-500" />
+                    <span>검색 진행 상황</span>
+                  </div>
+                  <span className="text-sm font-bold text-purple-600">
+                    {elapsedTime}초
                   </span>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="relative h-3 bg-slate-200 rounded-full overflow-hidden">
+                  {/* Animated gradient progress bar */}
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(
+                        searchProgress.phase === 'translating' ? 15 :
+                        searchProgress.phase === 'searching' ? 40 :
+                        searchProgress.phase === 'generating' ? Math.min(40 + elapsedTime * 2, 95) : 0
+                      , 100)}%`,
+                      background: 'linear-gradient(90deg, #8b5cf6, #06b6d4, #8b5cf6)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s linear infinite',
+                    }}
+                  />
+                  {/* Shimmer effect */}
+                  <div
+                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                    style={{ animation: 'shimmer 2s linear infinite' }}
+                  />
+                </div>
+
+                {/* Phase indicator text */}
+                <div className="text-xs text-center text-slate-500">
+                  {searchProgress.phase === 'translating' && '한글 질문을 영어로 번역 중...'}
+                  {searchProgress.phase === 'searching' && 'VectorDB에서 관련 논문 검색 중...'}
+                  {searchProgress.phase === 'generating' && 'AI가 답변을 생성하고 있습니다...'}
                 </div>
 
                 {/* Query Display */}

@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from src.data import sample_papers
 from src.services.pubmed import get_pubmed_service
-from src.services.pmc import get_pmc_service
+from src.services.pmc import get_pmc_service  # For PDF endpoints
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -131,6 +131,7 @@ async def search_papers_endpoint(request: SearchRequest):
             took_ms = int((time.time() - start_time) * 1000)
 
             # Convert PubMedPaper to PaperResult
+            # Note: PMC IDs are fetched during VectorDB save for better search performance
             results = []
             for i, paper in enumerate(papers):
                 # Calculate relevance score (decreasing by position)
@@ -143,7 +144,8 @@ async def search_papers_endpoint(request: SearchRequest):
                     authors=paper.authors,
                     journal=paper.journal,
                     publication_date=paper.publication_date,
-                    keywords=paper.keywords + paper.mesh_terms[:5]
+                    keywords=paper.keywords + paper.mesh_terms[:5],
+                    pmcid=None  # PMC ID fetched during VectorDB save
                 ))
 
             logger.info(f"PubMed search '{request.query}': {total} total, {len(results)} returned in {took_ms}ms")
