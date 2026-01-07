@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
 from src.core.csrf import CSRFMiddleware
 from src.core.database import init_db, close_db
-from src.api.v1 import auth, search, chat, library, trends, vectordb
+from src.api.v1 import auth, search, chat, library, trends, vectordb, graph
 from src.services.memory_factory import router as memory_router
 
 # Configure logging
@@ -35,6 +35,18 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database initialization failed: {e}")
         logger.warning("Running in limited mode without database")
 
+    # Initialize Graph Database
+    try:
+        from src.services.graph_service import get_graph_service
+        graph = get_graph_service()
+        if graph.is_connected:
+            graph.init_schema()
+            logger.info("Neo4j Graph Database initialized")
+        else:
+            logger.warning("Neo4j not connected, running without graph features")
+    except Exception as e:
+        logger.warning(f"Graph database initialization failed: {e}")
+
     yield
 
     # Shutdown
@@ -42,6 +54,14 @@ async def lifespan(app: FastAPI):
     try:
         await close_db()
         logger.info("Database connections closed")
+    except Exception:
+        pass
+
+    # Close Graph Database
+    try:
+        from src.services.graph_service import close_graph_service
+        close_graph_service()
+        logger.info("Neo4j connection closed")
     except Exception:
         pass
 
@@ -76,6 +96,7 @@ app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(library.router, prefix="/api/v1/library", tags=["Library"])
 app.include_router(trends.router, prefix="/api/v1/trends", tags=["Trends"])
 app.include_router(vectordb.router, prefix="/api/v1/vectordb", tags=["VectorDB"])
+app.include_router(graph.router, prefix="/api/v1/graph", tags=["Graph"])
 app.include_router(memory_router, prefix="/api/v1")
 
 
