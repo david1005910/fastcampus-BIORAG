@@ -3,7 +3,7 @@
 import time
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 
 from fastapi.responses import Response
@@ -14,6 +14,53 @@ from src.services.pmc import get_pmc_service  # For PDF endpoints
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ============== GraphDB Integration ==============
+
+def record_search_to_graph(query: str, results: List[dict], user_id: str = None):
+    """Record search query and results to GraphDB (background task)"""
+    try:
+        from src.services.graph_service import get_graph_service
+        graph = get_graph_service()
+
+        if not graph.is_connected:
+            logger.debug("GraphDB not connected, skipping search recording")
+            return
+
+        # Record search term
+        graph.add_search_term(query, user_id)
+
+        # Extract keywords from query for co-occurrence
+        keywords = [kw.strip() for kw in query.lower().split() if len(kw.strip()) > 2]
+        if len(keywords) >= 2:
+            # Record co-occurrence between query terms
+            for i, kw1 in enumerate(keywords[:5]):  # Limit to first 5 keywords
+                for kw2 in keywords[i+1:5]:
+                    graph.add_search_cooccurrence(kw1, kw2, user_id)
+
+        # Add papers and link to search term
+        for result in results[:10]:  # Limit to top 10 results
+            pmid = result.get("pmid", "")
+            if pmid:
+                # Add paper to graph
+                graph.add_paper(
+                    pmid=pmid,
+                    title=result.get("title", ""),
+                    authors=result.get("authors", []),
+                    keywords=result.get("keywords", [])
+                )
+                # Link search term to paper
+                graph.link_search_to_paper(
+                    term=query,
+                    pmid=pmid,
+                    relevance=result.get("relevance_score", 0.5)
+                )
+
+        logger.debug(f"Recorded search to GraphDB: '{query}' with {len(results)} results")
+
+    except Exception as e:
+        logger.warning(f"Failed to record search to GraphDB: {e}")
 
 router = APIRouter()
 
@@ -90,7 +137,10 @@ class PDFInfoResponse(BaseModel):
 # ============== Endpoints ==============
 
 @router.post("/search", response_model=SearchResponse)
-async def search_papers_endpoint(request: SearchRequest):
+async def search_papers_endpoint(
+    request: SearchRequest,
+    background_tasks: BackgroundTasks
+):
     """
     Semantic search for papers
 
@@ -98,6 +148,7 @@ async def search_papers_endpoint(request: SearchRequest):
     - source="mock": Sample data for testing
     - Supports filters for year, journal, authors
     - Returns top-K most relevant papers
+    - **Auto-records to GraphDB** for relationship analysis
     """
     start_time = time.time()
 
@@ -150,6 +201,10 @@ async def search_papers_endpoint(request: SearchRequest):
 
             logger.info(f"PubMed search '{request.query}': {total} total, {len(results)} returned in {took_ms}ms")
 
+            # Record search to GraphDB in background
+            results_for_graph = [r.model_dump() for r in results]
+            background_tasks.add_task(record_search_to_graph, request.query, results_for_graph)
+
             return SearchResponse(
                 total=total,
                 took_ms=took_ms,
@@ -174,6 +229,9 @@ async def search_papers_endpoint(request: SearchRequest):
     )
 
     took_ms = int((time.time() - start_time) * 1000)
+
+    # Record search to GraphDB in background
+    background_tasks.add_task(record_search_to_graph, request.query, results)
 
     return SearchResponse(
         total=total,

@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from src.core.security import get_current_user_id, get_current_user_id_optional
@@ -14,6 +14,57 @@ from src.core.config import settings
 from src.api.v1.vectordb import get_vector_store
 
 logger = logging.getLogger(__name__)
+
+
+# ============== GraphDB Integration ==============
+
+def record_chat_to_graph(
+    query: str,
+    translated_query: str,
+    sources: List[dict],
+    user_id: str = None,
+    previous_query: str = None
+):
+    """Record chat query and sources to GraphDB (background task)"""
+    try:
+        from src.services.graph_service import get_graph_service
+        graph = get_graph_service()
+
+        if not graph.is_connected:
+            logger.debug("GraphDB not connected, skipping chat recording")
+            return
+
+        # Record original query
+        graph.add_search_term(query, user_id)
+
+        # Record translated query if different
+        if translated_query and translated_query != query:
+            graph.add_search_term(translated_query, user_id)
+            graph.add_search_cooccurrence(query, translated_query, user_id)
+
+        # Record search flow if there was a previous query
+        if previous_query and previous_query != query:
+            graph.add_search_flow(previous_query, query, user_id)
+
+        # Add papers and link to query
+        for source in sources[:10]:
+            pmid = source.get("pmid", "")
+            if pmid:
+                graph.add_paper(
+                    pmid=pmid,
+                    title=source.get("title", ""),
+                    keywords=[]
+                )
+                graph.link_search_to_paper(
+                    term=query,
+                    pmid=pmid,
+                    relevance=source.get("relevance", 0.5)
+                )
+
+        logger.debug(f"Recorded chat to GraphDB: '{query}' with {len(sources)} sources")
+
+    except Exception as e:
+        logger.warning(f"Failed to record chat to GraphDB: {e}")
 
 
 # ============== Korean Translation ==============
@@ -169,6 +220,7 @@ class MessageListResponse(BaseModel):
 @router.post("/query", response_model=ChatQueryResponse)
 async def chat_query(
     request: ChatQueryRequest,
+    background_tasks: BackgroundTasks,
     user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """
@@ -179,6 +231,7 @@ async def chat_query(
     - **PubMed Fallback**: Falls back to PubMed API if VectorDB has no results
     - Uses OpenAI GPT to generate contextual answers
     - Includes source citations with PMID links
+    - **Auto-records to GraphDB** for relationship analysis
 
     Search modes for VectorDB:
     - "hybrid": Combined dense + sparse search (default)
@@ -332,6 +385,19 @@ async def chat_query(
         confidence = 0.3 if papers_for_context else 0.1
 
     processing_time = int((time.time() - start_time) * 1000)
+
+    # Record to GraphDB in background
+    sources_for_graph = [
+        {"pmid": s.pmid, "title": s.title, "relevance": s.relevance}
+        for s in sources
+    ]
+    background_tasks.add_task(
+        record_chat_to_graph,
+        request.question,
+        search_query if is_korean_query else None,
+        sources_for_graph,
+        user_id
+    )
 
     return ChatQueryResponse(
         answer=answer,
