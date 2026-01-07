@@ -432,6 +432,92 @@ export interface VectorDBPapersResponse {
   total: number
 }
 
+// ============== GraphDB API ==============
+
+export interface RelatedTerm {
+  term: string
+  searchCount: number
+  cooccurrence: number
+}
+
+export interface SearchFlow {
+  term: string
+  flowCount: number
+}
+
+export interface PopularTerm {
+  term: string
+  count: number
+}
+
+export interface GraphStats {
+  nodes: Record<string, number>
+  relationships: Record<string, number>
+}
+
+export interface GraphNetworkNode {
+  id: string
+  label: string
+  size: number
+}
+
+export interface GraphNetworkEdge {
+  source: string
+  target: string
+  weight: number
+}
+
+export interface GraphNetwork {
+  nodes: GraphNetworkNode[]
+  edges: GraphNetworkEdge[]
+}
+
+export const graphApi = {
+  getStatus: async (): Promise<{ connected: boolean; uri: string | null }> => {
+    const response = await api.get('/graph/status')
+    return response.data
+  },
+
+  getStats: async (): Promise<GraphStats> => {
+    const response = await api.get('/graph/stats')
+    return response.data
+  },
+
+  getRelatedTerms: async (term: string, limit: number = 10): Promise<RelatedTerm[]> => {
+    const response = await api.get(`/graph/search-terms/related/${encodeURIComponent(term)}`, {
+      params: { limit }
+    })
+    return response.data.map((r: Record<string, unknown>) => ({
+      term: r.term,
+      searchCount: r.search_count,
+      cooccurrence: r.cooccurrence,
+    }))
+  },
+
+  getSearchFlow: async (term: string, limit: number = 10): Promise<SearchFlow[]> => {
+    const response = await api.get(`/graph/search-terms/flow/${encodeURIComponent(term)}`, {
+      params: { limit }
+    })
+    return response.data.map((r: Record<string, unknown>) => ({
+      term: r.term,
+      flowCount: r.flow_count,
+    }))
+  },
+
+  getPopularTerms: async (limit: number = 20): Promise<PopularTerm[]> => {
+    const response = await api.get('/graph/search-terms/popular', { params: { limit } })
+    return response.data.map((r: Record<string, unknown>) => ({
+      term: r.term,
+      count: r.count,
+    }))
+  },
+
+  getSearchTermNetwork: async (limit: number = 100): Promise<GraphNetwork> => {
+    const response = await api.get('/graph/network/search-terms', { params: { limit } })
+    return response.data
+  },
+}
+
 export const vectordbApi = {
   savePapers: async (papers: PaperForVectorDB[], useDocling: boolean = false): Promise<SavePapersResponse> => {
     const response = await api.post('/vectordb/papers/save', { papers, use_docling: useDocling })

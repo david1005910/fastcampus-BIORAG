@@ -72,7 +72,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (searchProgress.phase === 'idle') return
 
-    const timers: NodeJS.Timeout[] = []
+    const timers: ReturnType<typeof setTimeout>[] = []
 
     if (searchProgress.phase === 'translating') {
       // Move to searching after 1s

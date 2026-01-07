@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, Filter, ExternalLink, MessageSquare, Bookmark, BookmarkCheck, Languages, Loader2, Database, CheckCircle, X, Calendar, BookOpen, Users, TrendingUp, ChevronLeft, ChevronRight, FileDown, FileX, Globe, Beaker, GraduationCap, Library, ChevronDown, ChevronUp } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { searchApi, libraryApi, vectordbApi } from '@/services/api'
+import { RelatedTerms } from '@/components/RelatedTerms'
 import { searchArxiv, searchCrossRef, type ExternalPaper, type ExternalSearchResponse } from '@/services/externalApis'
 import { useAuthStore } from '@/store/authStore'
 import { useSearchStore } from '@/store/searchStore'
@@ -457,6 +458,18 @@ export default function SearchPage() {
           </div>
         </div>
       )}
+
+      {/* Related Terms */}
+      <RelatedTerms
+        currentQuery={searchTerm}
+        onTermClick={(term) => {
+          setQuery(term)
+          setVectorDBSaveResult(null)
+          const filterParams = filtersToUrlParams(filters)
+          setSearchParams({ q: term, ...filterParams })
+        }}
+        className="mb-6"
+      />
 
       {/* Main Content Grid */}
       <div className="flex gap-6">
