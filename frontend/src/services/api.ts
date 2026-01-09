@@ -355,7 +355,11 @@ export const trendsApi = {
 
   getHotTopics: async (limit: number = 10): Promise<HotTopic[]> => {
     const response = await api.get('/trends/hot', { params: { limit } })
-    return response.data.topics
+    return response.data.topics.map((topic: { keyword: string; count: number; growth_rate: number }) => ({
+      keyword: topic.keyword,
+      count: topic.count,
+      growthRate: topic.growth_rate,
+    }))
   },
 
   analyzeTrend: async (query: string, language: string = 'ko'): Promise<TrendAnalysis> => {
@@ -472,6 +476,28 @@ export interface GraphNetwork {
   edges: GraphNetworkEdge[]
 }
 
+// Knowledge Network types (Paper, Author, Keyword relationships)
+export interface KnowledgeNode {
+  id: string
+  label: string
+  type: 'SearchTerm' | 'Paper' | 'Author' | 'Keyword'
+  size: number
+  pmid?: string
+}
+
+export interface KnowledgeEdge {
+  source: string
+  target: string
+  type: 'FOUND' | 'AUTHORED_BY' | 'MENTIONS'
+  weight: number
+}
+
+export interface KnowledgeNetwork {
+  nodes: KnowledgeNode[]
+  edges: KnowledgeEdge[]
+  search_term: string | null
+}
+
 export const graphApi = {
   getStatus: async (): Promise<{ connected: boolean; uri: string | null }> => {
     const response = await api.get('/graph/status')
@@ -514,6 +540,13 @@ export const graphApi = {
 
   getSearchTermNetwork: async (limit: number = 100): Promise<GraphNetwork> => {
     const response = await api.get('/graph/network/search-terms', { params: { limit } })
+    return response.data
+  },
+
+  getKnowledgeNetwork: async (searchTerm?: string, limit: number = 50): Promise<KnowledgeNetwork> => {
+    const response = await api.get('/graph/network/knowledge', {
+      params: { search_term: searchTerm, limit }
+    })
     return response.data
   },
 }

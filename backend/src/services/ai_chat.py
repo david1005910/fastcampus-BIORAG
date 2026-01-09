@@ -1,13 +1,93 @@
-"""AI Chat Service - OpenAI/Anthropic Integration with RAG"""
+"""AI Chat Service - OpenAI/Anthropic Integration with RAG
+
+Performance optimizations:
+- Concise system prompt for faster response
+- Reduced max_tokens (2000 instead of 4000)
+- LRU cache for repeated questions
+"""
 
 import logging
+import hashlib
+import time
 from typing import List, Optional, Dict
 from dataclasses import dataclass
+from collections import OrderedDict
 import aiohttp
 
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ============== Response Cache ==============
+
+class ResponseCache:
+    """LRU cache for RAG responses to avoid repeated LLM calls"""
+    def __init__(self, maxsize: int = 100, ttl_seconds: int = 1800):
+        self.cache: OrderedDict = OrderedDict()
+        self.maxsize = maxsize
+        self.ttl_seconds = ttl_seconds
+        self.timestamps: Dict[str, float] = {}
+        self.hits = 0
+        self.misses = 0
+
+    def _get_key(self, question: str, source_pmids: List[str]) -> str:
+        """Generate cache key from question and sources"""
+        key_str = f"{question}::{','.join(sorted(source_pmids))}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def get(self, question: str, source_pmids: List[str]) -> Optional[any]:
+        """Get cached response"""
+        key = self._get_key(question, source_pmids)
+        if key in self.cache:
+            if time.time() - self.timestamps.get(key, 0) > self.ttl_seconds:
+                del self.cache[key]
+                del self.timestamps[key]
+                return None
+            self.cache.move_to_end(key)
+            self.hits += 1
+            logger.info(f"RAG response cache HIT (hits: {self.hits}, misses: {self.misses})")
+            return self.cache[key]
+        self.misses += 1
+        return None
+
+    def set(self, question: str, source_pmids: List[str], response: any):
+        """Cache response"""
+        key = self._get_key(question, source_pmids)
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        else:
+            if len(self.cache) >= self.maxsize:
+                oldest_key = next(iter(self.cache))
+                del self.cache[oldest_key]
+                del self.timestamps[oldest_key]
+        self.cache[key] = response
+        self.timestamps[key] = time.time()
+
+    def stats(self) -> Dict:
+        return {
+            "size": len(self.cache),
+            "maxsize": self.maxsize,
+            "ttl_seconds": self.ttl_seconds,
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": f"{(self.hits / (self.hits + self.misses) * 100):.1f}%" if (self.hits + self.misses) > 0 else "N/A"
+        }
+
+    def clear(self):
+        self.cache.clear()
+        self.timestamps.clear()
+        self.hits = 0
+        self.misses = 0
+
+
+# Global response cache
+_response_cache = ResponseCache(maxsize=100, ttl_seconds=1800)  # 30 min TTL
+
+
+def get_response_cache() -> ResponseCache:
+    """Get response cache instance"""
+    return _response_cache
 
 
 @dataclass
@@ -183,7 +263,7 @@ Paper {i}:
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> ChatResponse:
         """
-        Generate AI response with RAG context
+        Generate AI response with RAG context (with caching)
 
         Args:
             question: User's question
@@ -197,13 +277,26 @@ Paper {i}:
             logger.warning("No API key configured, using fallback response")
             return self._fallback_response(question, sources)
 
+        # Check cache first (only for queries without conversation history)
+        source_pmids = [s.pmid for s in sources]
+        if not conversation_history:
+            cached = _response_cache.get(question, source_pmids)
+            if cached:
+                return cached
+
         try:
             if self.provider == "openai":
-                return await self._openai_chat(question, sources, conversation_history)
+                response = await self._openai_chat(question, sources, conversation_history)
             elif self.provider == "anthropic":
-                return await self._anthropic_chat(question, sources, conversation_history)
+                response = await self._anthropic_chat(question, sources, conversation_history)
             else:
                 raise ValueError(f"Unknown provider: {self.provider}")
+
+            # Cache the response (only for queries without conversation history)
+            if not conversation_history:
+                _response_cache.set(question, source_pmids, response)
+
+            return response
 
         except Exception as e:
             logger.error(f"AI chat error: {e}")

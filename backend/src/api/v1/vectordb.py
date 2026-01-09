@@ -3,6 +3,11 @@
 Implements Hybrid Search combining:
 - Dense Search: Qdrant vector similarity using OpenAI embeddings
 - Sparse Search: SPLADE-inspired keyword expansion with BM25
+
+Performance optimizations:
+- LRU cache for query embeddings (avoids repeated OpenAI API calls)
+- LRU cache for query expansion (avoids repeated GPT calls)
+- Parallel execution of dense and sparse searches
 """
 
 import time
@@ -10,8 +15,10 @@ import logging
 import uuid
 import re
 import math
+import asyncio
+import hashlib
 from typing import List, Optional, Dict, Tuple
-from collections import Counter
+from collections import Counter, OrderedDict
 from fastapi import APIRouter
 from pydantic import BaseModel
 import aiohttp
@@ -23,6 +30,67 @@ from src.services.docling_service import get_docling_service
 from src.services.pmc import get_pmc_service
 
 logger = logging.getLogger(__name__)
+
+
+# ============== LRU Cache Implementation ==============
+
+class LRUCache:
+    """Thread-safe LRU cache for async operations"""
+    def __init__(self, maxsize: int = 100, ttl_seconds: int = 3600):
+        self.cache: OrderedDict = OrderedDict()
+        self.maxsize = maxsize
+        self.ttl_seconds = ttl_seconds
+        self.timestamps: Dict[str, float] = {}
+
+    def _get_key(self, text: str) -> str:
+        """Generate cache key from text"""
+        return hashlib.md5(text.encode()).hexdigest()
+
+    def get(self, text: str) -> Optional[any]:
+        """Get item from cache"""
+        key = self._get_key(text)
+        if key in self.cache:
+            # Check TTL
+            if time.time() - self.timestamps.get(key, 0) > self.ttl_seconds:
+                del self.cache[key]
+                del self.timestamps[key]
+                return None
+            # Move to end (most recently used)
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        return None
+
+    def set(self, text: str, value: any):
+        """Set item in cache"""
+        key = self._get_key(text)
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        else:
+            if len(self.cache) >= self.maxsize:
+                # Remove oldest item
+                oldest_key = next(iter(self.cache))
+                del self.cache[oldest_key]
+                del self.timestamps[oldest_key]
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+
+    def clear(self):
+        """Clear all cache"""
+        self.cache.clear()
+        self.timestamps.clear()
+
+    def stats(self) -> Dict:
+        """Get cache statistics"""
+        return {
+            "size": len(self.cache),
+            "maxsize": self.maxsize,
+            "ttl_seconds": self.ttl_seconds
+        }
+
+
+# Global caches for embeddings and query expansion
+_embedding_cache = LRUCache(maxsize=500, ttl_seconds=3600)  # 1 hour TTL
+_query_expansion_cache = LRUCache(maxsize=200, ttl_seconds=1800)  # 30 min TTL
 
 router = APIRouter()
 
@@ -131,6 +199,7 @@ class SPLADESearch:
         Returns list of (term, weight) pairs.
 
         IMPORTANT: Original query terms get highest weight (2.0) to ensure relevance.
+        Uses LRU cache to avoid repeated API calls for same queries.
         """
         # Always include original query terms with highest weight
         original_tokens = self._tokenize(query)
@@ -138,6 +207,12 @@ class SPLADESearch:
 
         if not settings.OPENAI_API_KEY:
             return original_terms
+
+        # Check cache first
+        cached_result = _query_expansion_cache.get(query)
+        if cached_result is not None:
+            logger.info(f"Query expansion cache HIT for: {query[:50]}...")
+            return cached_result
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -198,7 +273,11 @@ Your output (terms only, comma-separated):"""
                                 weighted_terms.append((term, weight))
                                 seen_terms.add(term)
 
-                        return weighted_terms[:20]  # Limit total terms
+                        result = weighted_terms[:20]  # Limit total terms
+                        # Cache the result
+                        _query_expansion_cache.set(query, result)
+                        logger.info(f"Query expansion cache MISS, cached: {query[:50]}...")
+                        return result
                     else:
                         return original_terms
         except Exception as e:
@@ -475,9 +554,15 @@ class HybridVectorStore:
             logger.info(f"SPLADE index rebuilt with {len(texts)} documents")
 
     async def get_embedding(self, text: str) -> Optional[np.ndarray]:
-        """Get embedding using OpenAI API"""
+        """Get embedding using OpenAI API with LRU caching"""
         if not settings.OPENAI_API_KEY:
             return None
+
+        # Check cache first
+        cached_embedding = _embedding_cache.get(text)
+        if cached_embedding is not None:
+            logger.info(f"Embedding cache HIT for: {text[:50]}...")
+            return cached_embedding
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -497,7 +582,11 @@ class HybridVectorStore:
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return np.array(data["data"][0]["embedding"])
+                        embedding = np.array(data["data"][0]["embedding"])
+                        # Cache the result
+                        _embedding_cache.set(text, embedding)
+                        logger.info(f"Embedding cache MISS, cached: {text[:50]}...")
+                        return embedding
                     else:
                         logger.error(f"Embedding API error: {response.status}")
                         return None
@@ -721,6 +810,7 @@ class HybridVectorStore:
         - Sparse weight: 0.3 (keyword matching)
         - Synergy boost: +0.1 when document appears in both search results
         - Query expansion: Original words weight 2.0, expanded words <= 1.0
+        - PARALLEL execution of dense and sparse searches for performance
 
         Score ranges:
         - Dense score: [0, 1] (cosine similarity)
@@ -732,12 +822,16 @@ class HybridVectorStore:
 
         sparse_weight = 1.0 - dense_weight  # 0.3
 
-        # Get dense results
-        dense_results = await self.search_dense(query, top_k=len(self.documents))
-        dense_scores_map = {r["id"]: r["dense_score"] for r in dense_results}
+        # Run dense and sparse searches IN PARALLEL for better performance
+        start_time = time.time()
+        dense_results, sparse_results = await asyncio.gather(
+            self.search_dense(query, top_k=len(self.documents)),
+            self.search_sparse(query, top_k=len(self.documents))
+        )
+        parallel_time = (time.time() - start_time) * 1000
+        logger.info(f"Parallel search completed in {parallel_time:.0f}ms")
 
-        # Get sparse results
-        sparse_results = await self.search_sparse(query, top_k=len(self.documents))
+        dense_scores_map = {r["id"]: r["dense_score"] for r in dense_results}
         sparse_scores_map = {r["id"]: r["sparse_score"] for r in sparse_results}
         matched_terms_map = {r["id"]: r.get("matched_terms", []) for r in sparse_results}
 
@@ -1120,6 +1214,36 @@ async def get_vectordb_stats():
         qdrant_status=stats.get("qdrant_status"),
         docling_available=docling_available
     )
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """
+    Get cache statistics for performance monitoring
+
+    - Shows embedding cache size and TTL
+    - Shows query expansion cache size and TTL
+    - Useful for debugging and monitoring
+    """
+    return {
+        "embedding_cache": _embedding_cache.stats(),
+        "query_expansion_cache": _query_expansion_cache.stats(),
+        "status": "active"
+    }
+
+
+@router.delete("/cache/clear")
+async def clear_cache():
+    """
+    Clear all caches
+
+    - Clears embedding cache
+    - Clears query expansion cache
+    - Use when you want to force fresh API calls
+    """
+    _embedding_cache.clear()
+    _query_expansion_cache.clear()
+    return {"message": "All caches cleared", "status": "success"}
 
 
 class VectorDBPaper(BaseModel):

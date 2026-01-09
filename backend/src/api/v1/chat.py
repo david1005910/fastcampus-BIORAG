@@ -521,3 +521,32 @@ async def delete_session(
     # TODO: Delete from database
 
     return {"message": f"Session {session_id} deleted"}
+
+
+@router.get("/cache/stats")
+async def get_chat_cache_stats():
+    """
+    Get RAG response cache statistics
+
+    - Shows cache size and hit rate
+    - Useful for monitoring performance
+    """
+    from src.services.ai_chat import get_response_cache
+    cache = get_response_cache()
+    return {
+        "response_cache": cache.stats(),
+        "status": "active"
+    }
+
+
+@router.delete("/cache/clear")
+async def clear_chat_cache():
+    """
+    Clear RAG response cache
+
+    - Forces fresh LLM responses for all queries
+    """
+    from src.services.ai_chat import get_response_cache
+    cache = get_response_cache()
+    cache.clear()
+    return {"message": "RAG response cache cleared", "status": "success"}

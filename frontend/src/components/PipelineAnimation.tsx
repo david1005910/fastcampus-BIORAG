@@ -63,6 +63,24 @@ const PIPELINE_STEPS: PipelineStep[] = [
   },
   {
     id: 6,
+    name: 'Session Memory',
+    nameKo: '세션 메모리',
+    description: '대화 히스토리 및 컨텍스트 관리',
+    color: '#A855F7',
+    icon: '🧠',
+    details: ['대화 세션 조회', '이전 질문/답변 로드', '컨텍스트 윈도우 관리'],
+  },
+  {
+    id: 7,
+    name: 'GraphDB Search',
+    nameKo: 'GraphDB 검색',
+    description: 'Neo4j 지식 그래프에서 관계 탐색',
+    color: '#14B8A6',
+    icon: '🕸️',
+    details: ['논문-저자-키워드 관계 탐색', '검색어 연관 논문 조회', 'Cypher 쿼리 실행'],
+  },
+  {
+    id: 8,
     name: 'Hybrid Search',
     nameKo: '하이브리드 검색',
     description: 'Dense + Sparse 검색 융합',
@@ -71,7 +89,7 @@ const PIPELINE_STEPS: PipelineStep[] = [
     details: ['Dense: 의미 유사도 (70%)', 'Sparse: 키워드 매칭 (30%)', 'Score Fusion'],
   },
   {
-    id: 7,
+    id: 9,
     name: 'Context Building',
     nameKo: '컨텍스트 구성',
     description: '검색 결과로 프롬프트 구성',
@@ -80,7 +98,7 @@ const PIPELINE_STEPS: PipelineStep[] = [
     details: ['Top-K 문서 선택', '관련성 점수 기반 정렬', '프롬프트 템플릿 적용'],
   },
   {
-    id: 8,
+    id: 10,
     name: 'LLM Generation',
     nameKo: 'LLM 응답 생성',
     description: 'GPT-4로 답변 생성',
@@ -190,9 +208,9 @@ export default function PipelineAnimation() {
 
       {/* Pipeline Steps - Desktop: 2 rows, Mobile: Single column */}
       <div className="hidden lg:block">
-        {/* Top Row (Steps 1-4) */}
+        {/* Top Row (Steps 1-5) */}
         <div className="flex items-center justify-between mb-4">
-          {PIPELINE_STEPS.slice(0, 4).map((step, index) => (
+          {PIPELINE_STEPS.slice(0, 5).map((step, index) => (
             <div key={step.id} className="flex items-center">
               <StepBox
                 step={step}
@@ -201,10 +219,10 @@ export default function PipelineAnimation() {
                 onClick={() => handleStepClick(index)}
                 showDetails={showDetails && currentStep === index}
               />
-              {index < 3 && (
-                <div className="mx-2">
+              {index < 4 && (
+                <div className="mx-1">
                   <ChevronRight
-                    size={24}
+                    size={20}
                     className={`transition-all duration-300 ${
                       currentStep > index ? 'text-cyan-400' : 'text-white/20'
                     }`}
@@ -216,26 +234,26 @@ export default function PipelineAnimation() {
         </div>
 
         {/* Connector between rows */}
-        <div className="flex justify-end pr-[60px] mb-4">
+        <div className="flex justify-end pr-[52px] mb-4">
           <div
             className={`w-1 h-8 rounded-full transition-all duration-300 ${
-              currentStep >= 4 ? 'bg-cyan-400' : 'bg-white/20'
+              currentStep >= 5 ? 'bg-cyan-400' : 'bg-white/20'
             }`}
           />
         </div>
 
-        {/* Bottom Row (Steps 5-8) - Reversed order for flow */}
+        {/* Bottom Row (Steps 6-10) - Reversed order for flow */}
         <div className="flex items-center justify-between flex-row-reverse">
-          {PIPELINE_STEPS.slice(4)
+          {PIPELINE_STEPS.slice(5)
             .reverse()
             .map((step, revIndex) => {
-              const index = 7 - revIndex
+              const index = 9 - revIndex
               return (
                 <div key={step.id} className="flex items-center">
-                  {revIndex < 3 && (
-                    <div className="mx-2">
+                  {revIndex < 4 && (
+                    <div className="mx-1">
                       <ChevronRight
-                        size={24}
+                        size={20}
                         className={`rotate-180 transition-all duration-300 ${
                           currentStep > index ? 'text-cyan-400' : 'text-white/20'
                         }`}
@@ -383,7 +401,7 @@ function StepBox({
       }`}
     >
       <div
-        className={`w-32 h-28 rounded-xl p-3 flex flex-col items-center justify-center transition-all duration-300 ${
+        className={`w-28 h-24 rounded-xl p-2 flex flex-col items-center justify-center transition-all duration-300 ${
           isActive ? 'ring-2 ring-offset-2 ring-offset-slate-900 ring-cyan-400' : ''
         }`}
         style={{
@@ -392,9 +410,9 @@ function StepBox({
           border: `2px solid ${step.color}`,
         }}
       >
-        <span className="text-2xl mb-1">{step.icon}</span>
-        <span className="text-white text-xs font-semibold text-center">{step.nameKo}</span>
-        <span className="text-white/60 text-[10px]">Step {step.id}</span>
+        <span className="text-xl mb-1">{step.icon}</span>
+        <span className="text-white text-[10px] font-semibold text-center leading-tight">{step.nameKo}</span>
+        <span className="text-white/60 text-[9px]">Step {step.id}</span>
       </div>
 
       {/* Pulse animation for active step */}
@@ -458,7 +476,30 @@ async def process_query(question: str) -> dict:
     query_embedding = await generate_embedding(question)
     return {"embedding": query_embedding, "original": question}`,
 
-    6: `# 하이브리드 검색
+    6: `# 세션 메모리 관리
+async def get_session_memory(session_id: str, max_history: int = 5):
+    # 이전 대화 기록 조회
+    messages = await db.get_session_messages(session_id)
+    recent = messages[-max_history:] if len(messages) > max_history else messages
+
+    # 컨텍스트 윈도우 구성
+    history = [{"role": m.role, "content": m.content} for m in recent]
+    return {"session_id": session_id, "history": history, "turn_count": len(messages)}`,
+
+    7: `# GraphDB 지식 그래프 검색
+async def search_knowledge_graph(search_term: str, limit: int = 50):
+    # Neo4j Cypher 쿼리로 관계 탐색
+    query = """
+    MATCH (s:SearchTerm {term: $term})-[:FOUND]->(p:Paper)
+    MATCH (p)-[:AUTHORED_BY]->(a:Author)
+    MATCH (p)-[:MENTIONS]->(k:Keyword)
+    RETURN p.pmid, p.title, collect(a.name) as authors, collect(k.name) as keywords
+    LIMIT $limit
+    """
+    results = await neo4j.run(query, {"term": search_term, "limit": limit})
+    return results`,
+
+    8: `# 하이브리드 검색
 async def hybrid_search(query_emb, query_text, top_k=10):
     # Dense search (70%)
     dense_results = await qdrant.search(
@@ -470,24 +511,26 @@ async def hybrid_search(query_emb, query_text, top_k=10):
     # Score fusion
     return fuse_scores(dense_results, sparse_results, weights=[0.7, 0.3])`,
 
-    7: `# 컨텍스트 구성
-def build_context(search_results: list, max_tokens: int = 4000) -> str:
+    9: `# 컨텍스트 구성
+def build_context(search_results: list, graph_results: list, memory: dict) -> str:
     context_parts = []
-    for result in search_results[:5]:  # Top-K 선택
-        context_parts.append(f'''
-        [PMID: {result.pmid}] {result.title}
-        {result.abstract[:500]}...
-        ''')
+    # 벡터 검색 결과
+    for result in search_results[:5]:
+        context_parts.append(f"[PMID: {result.pmid}] {result.title}\\n{result.abstract[:500]}...")
+    # GraphDB 결과 추가
+    for paper in graph_results[:3]:
+        context_parts.append(f"[Related] {paper.title} by {paper.authors}")
     return "\\n".join(context_parts)`,
 
-    8: `# LLM 응답 생성
-async def generate_answer(question: str, context: str) -> str:
+    10: `# LLM 응답 생성
+async def generate_answer(question: str, context: str, memory: dict) -> str:
+    messages = memory.get("history", []) + [
+        {"role": "system", "content": RAG_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Context:\\n{context}\\n\\nQuestion: {question}"}
+    ]
     response = await openai.chat.completions.create(
         model="gpt-4",
-        messages=[
-            {"role": "system", "content": RAG_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context:\\n{context}\\n\\nQuestion: {question}"}
-        ]
+        messages=messages
     )
     return response.choices[0].message.content`,
   }

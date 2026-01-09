@@ -318,3 +318,20 @@ async def get_search_term_network(
         raise HTTPException(status_code=503, detail="Neo4j not connected")
 
     return graph.get_search_term_network(limit)
+
+
+@router.get("/network/knowledge")
+async def get_knowledge_network(
+    search_term: Optional[str] = Query(None, description="검색어 (없으면 전체 네트워크)"),
+    limit: int = Query(50, ge=10, le=200)
+):
+    """
+    지식 네트워크 (시각화용)
+    - 논문, 저자, 키워드 간의 관계를 반환
+    - 검색어가 주어지면 해당 검색어와 연결된 논문 중심으로 네트워크 생성
+    """
+    graph = get_graph_service()
+    if not graph.is_connected:
+        raise HTTPException(status_code=503, detail="Neo4j not connected")
+
+    return graph.get_knowledge_network(search_term, limit)

@@ -5,6 +5,7 @@ import { TrendingUp, BarChart3, Flame, Loader2, Sparkles, Search, ArrowRight, Li
 import { trendsApi } from '@/services/api'
 import PipelineAnimation from '@/components/PipelineAnimation'
 import VectorSpaceAnimation from '@/components/VectorSpaceAnimation'
+import KnowledgeGraph3D from '@/components/KnowledgeGraph3D'
 import {
   BarChart,
   Bar,
@@ -109,7 +110,7 @@ export default function TrendsPage() {
               {viewMode === 'pipeline'
                 ? 'RAG 파이프라인의 작동 과정을 단계별로 확인하세요'
                 : viewMode === 'vector'
-                  ? '단어 임베딩이 벡터 공간에서 클러스터링되는 과정을 확인하세요'
+                  ? '벡터 공간과 지식 네트워크를 통해 검색어 관계를 시각화합니다'
                   : queryFromUrl
                     ? `"${queryFromUrl}" 관련 연구 트렌드 분석`
                     : '바이오메디컬 연구의 최신 트렌드를 확인하세요'
@@ -163,8 +164,33 @@ export default function TrendsPage() {
 
       {/* Vector Space Animation View */}
       {viewMode === 'vector' && (
-        <VectorSpaceAnimation />
+        <div className="space-y-6">
+          {/* Vector Space */}
+          <VectorSpaceAnimation />
+
+          {/* Knowledge Network below Vector Space - Connected with search */}
+          <KnowledgeGraph3D
+            searchQuery={queryFromUrl || undefined}
+            onNodeClick={(node) => {
+              // For Paper nodes, could navigate to paper detail
+              // For Author/Keyword nodes, just show selection (no search trigger)
+              // Only SearchTerm nodes trigger search via onSearchChange
+              if (node.type === 'Paper' && node.pmid) {
+                // Navigate to paper detail page
+                window.location.href = `/paper/${node.pmid}`
+              }
+              // Other node types (Keyword, Author) just get selected visually
+              // The selection is handled in KnowledgeGraph3D component
+            }}
+            onSearchChange={(query) => {
+              // Only called for SearchTerm nodes
+              setSearchInput(query)
+              setSearchParams({ q: query })
+            }}
+          />
+        </div>
       )}
+
 
       {/* Trends View */}
       {viewMode === 'trends' && (

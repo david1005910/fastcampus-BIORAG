@@ -380,6 +380,188 @@ class Neo4jService:
             "edges": edges
         }
 
+    def get_knowledge_network(self, search_term: str = None, limit: int = 50) -> Dict:
+        """
+        지식 네트워크 조회 - 논문, 저자, 키워드 관계 시각화
+        검색어가 주어지면 해당 검색어와 연결된 논문들을 중심으로 네트워크 생성
+        """
+        nodes = []
+        edges = []
+        node_ids = set()
+
+        if search_term:
+            # 검색어 노드 추가
+            search_node = {
+                "id": f"search_{search_term}",
+                "label": search_term,
+                "type": "SearchTerm",
+                "size": 20
+            }
+            nodes.append(search_node)
+            node_ids.add(search_node["id"])
+
+            # 검색어와 연결된 논문 조회
+            paper_query = """
+            MATCH (t:SearchTerm {term: $term})-[f:FOUND]->(p:Paper)
+            RETURN p.pmid as pmid, p.title as title, f.relevance as relevance
+            ORDER BY f.relevance DESC
+            LIMIT $limit
+            """
+            papers = self._execute_query(paper_query, {"term": search_term.lower(), "limit": limit})
+
+            for paper in papers:
+                paper_id = f"paper_{paper['pmid']}"
+                if paper_id not in node_ids:
+                    # 제목을 30자로 제한
+                    title = paper['title'][:30] + "..." if len(paper['title']) > 30 else paper['title']
+                    nodes.append({
+                        "id": paper_id,
+                        "label": title,
+                        "type": "Paper",
+                        "size": 10,
+                        "pmid": paper['pmid']
+                    })
+                    node_ids.add(paper_id)
+
+                edges.append({
+                    "source": search_node["id"],
+                    "target": paper_id,
+                    "type": "FOUND",
+                    "weight": paper.get('relevance', 1)
+                })
+
+                # 논문의 저자 조회
+                author_query = """
+                MATCH (p:Paper {pmid: $pmid})-[:AUTHORED_BY]->(a:Author)
+                RETURN a.name as name
+                LIMIT 5
+                """
+                authors = self._execute_query(author_query, {"pmid": paper['pmid']})
+                for author in authors:
+                    author_id = f"author_{author['name']}"
+                    if author_id not in node_ids:
+                        # 이름을 20자로 제한
+                        name = author['name'][:20] + "..." if len(author['name']) > 20 else author['name']
+                        nodes.append({
+                            "id": author_id,
+                            "label": name,
+                            "type": "Author",
+                            "size": 5
+                        })
+                        node_ids.add(author_id)
+
+                    edges.append({
+                        "source": paper_id,
+                        "target": author_id,
+                        "type": "AUTHORED_BY",
+                        "weight": 1
+                    })
+
+                # 논문의 키워드 조회
+                keyword_query = """
+                MATCH (p:Paper {pmid: $pmid})-[:MENTIONS]->(k:Keyword)
+                RETURN k.term as term
+                LIMIT 5
+                """
+                keywords = self._execute_query(keyword_query, {"pmid": paper['pmid']})
+                for keyword in keywords:
+                    keyword_id = f"keyword_{keyword['term']}"
+                    if keyword_id not in node_ids:
+                        nodes.append({
+                            "id": keyword_id,
+                            "label": keyword['term'],
+                            "type": "Keyword",
+                            "size": 7
+                        })
+                        node_ids.add(keyword_id)
+
+                    edges.append({
+                        "source": paper_id,
+                        "target": keyword_id,
+                        "type": "MENTIONS",
+                        "weight": 1
+                    })
+
+        else:
+            # 검색어 없이 전체 네트워크 - 최근 논문과 관련 저자/키워드
+            paper_query = """
+            MATCH (p:Paper)
+            RETURN p.pmid as pmid, p.title as title
+            ORDER BY p.created_at DESC
+            LIMIT $limit
+            """
+            papers = self._execute_query(paper_query, {"limit": min(limit, 20)})
+
+            for paper in papers:
+                paper_id = f"paper_{paper['pmid']}"
+                if paper_id not in node_ids:
+                    title = paper['title'][:30] + "..." if len(paper['title']) > 30 else paper['title']
+                    nodes.append({
+                        "id": paper_id,
+                        "label": title,
+                        "type": "Paper",
+                        "size": 10,
+                        "pmid": paper['pmid']
+                    })
+                    node_ids.add(paper_id)
+
+                # 저자 조회
+                author_query = """
+                MATCH (p:Paper {pmid: $pmid})-[:AUTHORED_BY]->(a:Author)
+                RETURN a.name as name
+                LIMIT 3
+                """
+                authors = self._execute_query(author_query, {"pmid": paper['pmid']})
+                for author in authors:
+                    author_id = f"author_{author['name']}"
+                    if author_id not in node_ids:
+                        name = author['name'][:20] + "..." if len(author['name']) > 20 else author['name']
+                        nodes.append({
+                            "id": author_id,
+                            "label": name,
+                            "type": "Author",
+                            "size": 5
+                        })
+                        node_ids.add(author_id)
+
+                    edges.append({
+                        "source": paper_id,
+                        "target": author_id,
+                        "type": "AUTHORED_BY",
+                        "weight": 1
+                    })
+
+                # 키워드 조회
+                keyword_query = """
+                MATCH (p:Paper {pmid: $pmid})-[:MENTIONS]->(k:Keyword)
+                RETURN k.term as term
+                LIMIT 3
+                """
+                keywords = self._execute_query(keyword_query, {"pmid": paper['pmid']})
+                for keyword in keywords:
+                    keyword_id = f"keyword_{keyword['term']}"
+                    if keyword_id not in node_ids:
+                        nodes.append({
+                            "id": keyword_id,
+                            "label": keyword['term'],
+                            "type": "Keyword",
+                            "size": 7
+                        })
+                        node_ids.add(keyword_id)
+
+                    edges.append({
+                        "source": paper_id,
+                        "target": keyword_id,
+                        "type": "MENTIONS",
+                        "weight": 1
+                    })
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "search_term": search_term
+        }
+
     def get_stats(self) -> Dict:
         """그래프 통계"""
         stats = {}
